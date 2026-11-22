@@ -3,6 +3,8 @@
 A small macOS focus pill: it sits on top of everything, shows what you are working on,
 and nudges you back when you drift. Built with Tauri 2 + Rust + React.
 
+![The nudge pill floating above other windows](docs/assets/interface.png)
+
 ## Install (curl)
 
 ```bash
