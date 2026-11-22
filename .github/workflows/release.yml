@@ -1,0 +1,65 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: universal
+
+      - run: npm ci
+
+      - name: Build universal app and dmg
+        run: npm run tauri build -- --target universal-apple-darwin
+
+      - name: Package release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release
+
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/nudge.app"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" release/nudge-universal.zip
+
+          DMG=$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name '*.dmg' -print -quit)
+          if [ -n "$DMG" ]; then
+            cp "$DMG" release/
+          fi
+
+          cp install.sh release/install.sh
+          cd release
+          shasum -a 256 nudge-universal.zip > nudge-universal.zip.sha256
+          ls -lh
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/nudge-universal.zip
+            release/nudge-universal.zip.sha256
+            release/install.sh
+            release/*.dmg
+          generate_release_notes: true

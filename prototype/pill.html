@@ -1,0 +1,627 @@
+<!doctype html>
+<!--
+  THROWAWAY PROTOTYPE — not part of the app.
+
+  Question: does the pill feel right, and which of three structurally different
+  variants should we build? Switch with the bottom bar or the ?variant= param:
+    A — Dot + text (the agreed baseline)
+    B — Tag + text (text-forward, squarer, no dot)
+    C — Progress ring (shows time until the next nudge)
+
+  Everything here is simulated in CSS: real vibrancy is NSVisualEffectView,
+  real always-on-top/fullscreen behaviour can only be judged inside Tauri.
+
+  Run: npm run proto   (or just open this file)
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>nudge — pill prototype</title>
+<style>
+  :root {
+    --accent: #30d158;
+    --muted: #8e8e93;
+    --pill-bg: rgba(28, 28, 30, 0.62);
+    --pill-border: rgba(255, 255, 255, 0.14);
+    --text: #f5f5f7;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    color: var(--text);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  body {
+    background:
+      radial-gradient(1200px 800px at 15% 10%, #3a2b6b 0%, transparent 60%),
+      radial-gradient(900px 700px at 85% 18%, #0f4c5c 0%, transparent 55%),
+      radial-gradient(1000px 900px at 62% 105%, #7a2e4a 0%, transparent 60%),
+      linear-gradient(160deg, #1b1b2f 0%, #0b0b12 60%, #141021 100%);
+  }
+
+  /* ---- fake desktop, only so the pill has something to be judged against ---- */
+
+  .menubar {
+    position: fixed;
+    inset: 0 0 auto 0;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(0, 0, 0, 0.25);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    z-index: 10;
+  }
+  .menubar .left, .menubar .right { display: flex; gap: 16px; align-items: center; }
+  .menubar b { font-weight: 600; }
+
+  .win {
+    position: absolute;
+    border-radius: 10px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    z-index: 1;
+    overflow: hidden;
+  }
+  .win.light {
+    left: 12%;
+    top: 18%;
+    width: 46%;
+    height: 40%;
+    background: #f4f4f2;
+  }
+  .win.dark {
+    right: 9%;
+    top: 48%;
+    width: 31%;
+    height: 34%;
+    background: #1e1e21;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .win .bar {
+    height: 26px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  }
+  .win.dark .bar { border-bottom-color: rgba(255, 255, 255, 0.08); }
+  .lights { display: flex; gap: 6px; }
+  .lights i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+  .lights i:nth-child(1) { background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+  .win .body { padding: 18px 22px; }
+  .line { height: 9px; border-radius: 3px; background: rgba(0, 0, 0, 0.09); margin: 11px 0; }
+  .win.dark .line { background: rgba(255, 255, 255, 0.09); }
+  .line.short { width: 42%; }
+  .line.mid { width: 72%; }
+
+  /* ---- the pill ---- */
+
+  .pill {
+    position: absolute;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 15px;
+    background: var(--pill-bg);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--pill-border);
+    box-shadow:
+      0 6px 20px rgba(0, 0, 0, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    line-height: 1;
+    white-space: nowrap;
+    max-width: 360px;
+    cursor: default;
+    transition: opacity 0.18s ease, transform 0.18s ease, border-color 0.15s ease;
+    will-change: left, top;
+  }
+  .pill.dragging {
+    cursor: grabbing;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+  }
+  .pill.hidden {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+    pointer-events: none;
+  }
+
+  .label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 320px;
+    min-width: 0;
+  }
+  .label.muted { color: rgba(245, 245, 247, 0.55); }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex: none;
+  }
+  .pill.empty .dot { background: var(--muted); }
+
+  /* B — text-forward tag */
+  .pill[data-variant="B"] {
+    border-radius: 10px;
+    padding: 0 10px;
+    background: rgba(22, 22, 24, 0.72);
+    gap: 9px;
+  }
+  .pill[data-variant="B"] .tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    flex: none;
+  }
+
+  /* C — progress ring */
+  .pill[data-variant="C"] { gap: 9px; }
+  .ring { flex: none; display: block; }
+  .ring .track { stroke: rgba(255, 255, 255, 0.18); }
+  .ring .fill { stroke: var(--accent); }
+  .pill.empty .ring .fill { stroke: var(--muted); }
+
+  /* edit mode */
+  .pill[data-mode="edit"] {
+    border-color: rgba(255, 255, 255, 0.34);
+    padding-right: 8px;
+  }
+  .pill input {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    margin: 0;
+    padding: 0;
+    width: 236px;
+    color: var(--text);
+    font: inherit;
+    letter-spacing: inherit;
+    caret-color: var(--accent);
+  }
+  .pill input::placeholder { color: rgba(245, 245, 247, 0.42); }
+
+  /* nudge pulse */
+  @keyframes dotPulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(48, 209, 88, 0.55); }
+    50% { transform: scale(1.35); box-shadow: 0 0 0 6px rgba(48, 209, 88, 0); }
+  }
+  @keyframes tagPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  @keyframes ringPulse {
+    0%, 100% { stroke: var(--accent); }
+    50% { stroke: #ffffff; }
+  }
+  .pill.nudge .dot { animation: dotPulse 1.2s ease-in-out 3; }
+  .pill.nudge .tag { animation: tagPulse 1.2s ease-in-out 3; }
+  .pill.nudge .ring .fill { animation: ringPulse 1.2s ease-in-out 3; }
+  body.reduce-motion .pill.nudge .dot,
+  body.reduce-motion .pill.nudge .tag,
+  body.reduce-motion .pill.nudge .ring .fill { animation: none !important; }
+
+  /* ---- prototype chrome (deliberately not part of the design) ---- */
+
+  .proto-panel {
+    position: fixed;
+    top: 38px;
+    right: 14px;
+    width: 268px;
+    z-index: 200;
+    padding: 12px 14px 14px;
+    border-radius: 10px;
+    background: rgba(16, 16, 18, 0.86);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    outline: 1px dashed rgba(255, 255, 255, 0.28);
+    outline-offset: -1px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #d8d8dc;
+  }
+  .proto-panel h2 {
+    margin: 0 0 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: #ffd60a;
+  }
+  .proto-panel .row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 7px; }
+  .proto-panel button {
+    font: inherit;
+    color: #f2f2f4;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+  .proto-panel button:hover { background: rgba(255, 255, 255, 0.18); }
+  .proto-panel button.active { background: rgba(48, 209, 88, 0.22); border-color: rgba(48, 209, 88, 0.6); }
+  .proto-panel label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .proto-panel input[type="checkbox"] { accent-color: #30d158; margin: 0; }
+  .proto-panel hr { border: 0; border-top: 1px solid rgba(255, 255, 255, 0.12); margin: 10px 0; }
+  .proto-panel .readout {
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    color: #9b9ba1;
+    word-break: break-word;
+  }
+  .proto-panel .readout b { color: #d8d8dc; font-weight: 600; }
+  .proto-panel .hint { margin-top: 8px; color: #7d7d84; }
+
+  .proto-switcher {
+    position: fixed;
+    left: 50%;
+    bottom: 20px;
+    transform: translateX(-50%);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: rgba(16, 16, 18, 0.9);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.12);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    color: #e8e8ec;
+  }
+  .proto-switcher button {
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    padding: 4px 8px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .proto-switcher button:hover { background: rgba(255, 255, 255, 0.12); }
+  .proto-switcher .key { color: #ffd60a; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="menubar">
+  <div class="left"><span>&#63743;</span><b>Finder</b><span>File</span><span>Edit</span><span>View</span></div>
+  <div class="right"><span>&#9681; Wi&#8209;Fi</span><span>&#128267; 100%</span><span>Sun 14:32</span></div>
+</div>
+
+<div class="win light">
+  <div class="bar"><span class="lights"><i></i><i></i><i></i></span></div>
+  <div class="body">
+    <div class="line mid"></div>
+    <div class="line"></div>
+    <div class="line"></div>
+    <div class="line short"></div>
+    <div class="line mid"></div>
+    <div class="line"></div>
+  </div>
+</div>
+
+<div class="win dark">
+  <div class="bar"><span class="lights"><i></i><i></i><i></i></span></div>
+  <div class="body">
+    <div class="line"></div>
+    <div class="line mid"></div>
+    <div class="line short"></div>
+    <div class="line"></div>
+  </div>
+</div>
+
+<div class="pill" id="pill" data-variant="A" data-mode="view" role="status" aria-live="polite"></div>
+
+<aside class="proto-panel">
+  <h2>PROTOTYPE CONTROLS</h2>
+  <div class="row">
+    <button id="btn-task">Task</button>
+    <button id="btn-notask">No task</button>
+    <button id="btn-edit">Edit</button>
+  </div>
+  <div class="row">
+    <button id="btn-nudge">Fire nudge</button>
+    <button id="btn-hide">Hide pill</button>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="chk-long" /> long task</label>
+    <label><input type="checkbox" id="chk-rm" /> reduce motion</label>
+  </div>
+  <div class="readout" id="readout"></div>
+  <div class="hint">Drag the pill, click it to edit. Enter commits, Esc reverts, click outside commits. Real vibrancy is native; this is simulated.</div>
+</aside>
+
+<div class="proto-switcher">
+  <button id="prev" aria-label="previous variant">&larr;</button>
+  <span><span class="key" id="vkey">A</span> <span id="vname">Dot + text</span></span>
+  <button id="next" aria-label="next variant">&rarr;</button>
+</div>
+
+<script>
+(() => {
+  const VARIANTS = {
+    A: { name: "Dot + text" },
+    B: { name: "Tag + text" },
+    C: { name: "Progress ring" },
+  };
+  const KEYS = ["A", "B", "C"];
+  const DEFAULT_TASK = "Writing the Q4 roadmap";
+  const LONG_TASK = "Reviewing the quarterly roadmap draft with the platform team before Thursday";
+  const MENUBAR = 30;
+
+  const state = {
+    variant: (new URLSearchParams(location.search).get("variant") || "A").toUpperCase(),
+    task: DEFAULT_TASK,
+    mode: "view",
+    hidden: false,
+    reduceMotion: false,
+    long: false,
+    pos: null,
+    nudgeTimer: null,
+    reverting: false,
+  };
+  if (!VARIANTS[state.variant]) state.variant = "A";
+
+  const pill = document.getElementById("pill");
+  const readout = document.getElementById("readout");
+
+  const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  function ring(progress) {
+    // r = 5.5 -> circumference ~34.56
+    const c = 34.56;
+    const offset = (c * (1 - progress)).toFixed(2);
+    return `<svg class="ring" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <circle class="track" cx="7" cy="7" r="5.5" fill="none" stroke-width="2"/>
+      <circle class="fill" cx="7" cy="7" r="5.5" fill="none" stroke-width="2"
+        stroke-dasharray="${c}" stroke-dashoffset="${offset}"
+        stroke-linecap="round" transform="rotate(-90 7 7)"/>
+    </svg>`;
+  }
+
+  function inner() {
+    if (state.mode === "edit") {
+      return `<input id="edit" maxlength="120" spellcheck="false" autocomplete="off"
+        placeholder="What are you working on?" value="${esc(state.task)}" />`;
+    }
+    const label = state.task ? esc(state.task) : "No task";
+    const cls = state.task ? "label" : "label muted";
+    switch (state.variant) {
+      case "B":
+        return state.task
+          ? `<span class="tag">Focus</span><span class="${cls}">${label}</span>`
+          : `<span class="${cls}">No task</span>`;
+      case "C":
+        return `${ring(state.task ? 0.62 : 1)}<span class="${cls}">${label}</span>`;
+      default:
+        return `<span class="dot"></span><span class="${cls}">${label}</span>`;
+    }
+  }
+
+  function render() {
+    pill.dataset.variant = state.variant;
+    pill.dataset.mode = state.mode;
+    pill.classList.toggle("empty", !state.task);
+    pill.classList.toggle("hidden", state.hidden);
+    pill.innerHTML = inner();
+
+    if (state.pos) {
+      pill.style.left = state.pos.x + "px";
+      pill.style.top = state.pos.y + "px";
+    }
+
+    if (!state.hidden) pill.style.transform = "";
+    document.body.classList.toggle("reduce-motion", state.reduceMotion);
+
+    const input = document.getElementById("edit");
+    if (input) {
+      input.focus();
+      input.select();
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); commit(); }
+        if (e.key === "Escape") { e.preventDefault(); state.reverting = true; state.mode = "view"; render(); }
+      });
+    }
+
+    document.getElementById("btn-hide").classList.toggle("active", state.hidden);
+    document.getElementById("btn-hide").textContent = state.hidden ? "Show pill" : "Hide pill";
+    document.getElementById("btn-notask").classList.toggle("active", !state.task);
+    document.getElementById("chk-long").checked = state.long;
+    document.getElementById("chk-rm").checked = state.reduceMotion;
+    document.getElementById("vkey").textContent = state.variant;
+    document.getElementById("vname").textContent = VARIANTS[state.variant].name;
+
+    readout.innerHTML =
+      `<b>variant</b> ${state.variant} &middot; <b>mode</b> ${state.mode} &middot; ` +
+      `<b>task</b> "${state.task ? esc(state.task.slice(0, 28)) + (state.task.length > 28 ? "\u2026" : "") : ""}" &middot; ` +
+      `<b>hidden</b> ${state.hidden} &middot; <b>motion</b> ${state.reduceMotion ? "reduced" : "full"}<br>` +
+      `<b>pos</b> ${state.pos ? Math.round(state.pos.x) + ", " + Math.round(state.pos.y) : "auto"}`;
+  }
+
+  function commit() {
+    const input = document.getElementById("edit");
+    if (input) state.task = input.value.trim().slice(0, 120);
+    state.mode = "view";
+    state.reverting = false;
+    render();
+  }
+
+  function enterEdit() {
+    if (state.hidden) state.hidden = false;
+    state.mode = "edit";
+    render();
+  }
+
+  function cycle(dir) {
+    const i = KEYS.indexOf(state.variant);
+    state.variant = KEYS[(i + dir + KEYS.length) % KEYS.length];
+    state.mode = "view";
+    const url = new URL(location.href);
+    url.searchParams.set("variant", state.variant);
+    history.replaceState(null, "", url);
+    pill.classList.remove("nudge");
+    render();
+  }
+
+  function fireNudge() {
+    clearTimeout(state.nudgeTimer);
+    pill.classList.remove("nudge");
+    void pill.offsetWidth; // restart the animation
+    pill.classList.add("nudge");
+    state.nudgeTimer = setTimeout(() => pill.classList.remove("nudge"), 3800);
+  }
+
+  function setTask(task, long) {
+    state.task = task;
+    state.long = long;
+    state.mode = "view";
+    render();
+  }
+
+  // ---- placement ----
+
+  function placeCentered() {
+    const w = pill.offsetWidth;
+    state.pos = {
+      x: Math.round((window.innerWidth - w) / 2),
+      y: Math.round(window.innerHeight * 0.4),
+    };
+  }
+
+  function clamp() {
+    if (!state.pos) return;
+    const w = pill.offsetWidth;
+    const h = pill.offsetHeight;
+    state.pos.x = Math.min(Math.max(8, state.pos.x), window.innerWidth - w - 8);
+    state.pos.y = Math.min(Math.max(MENUBAR, state.pos.y), window.innerHeight - h - 8);
+  }
+
+  // ---- drag vs click ----
+
+  let drag = null;
+
+  pill.addEventListener("pointerdown", (e) => {
+    if (state.mode === "edit") return;
+    if (e.button !== 0) return;
+    drag = {
+      id: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: state.pos.x,
+      originY: state.pos.y,
+      moved: false,
+    };
+    pill.setPointerCapture(e.pointerId);
+  });
+
+  pill.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) > 4) {
+      drag.moved = true;
+      pill.classList.add("dragging");
+    }
+    if (!drag.moved) return;
+    state.pos = { x: drag.originX + dx, y: drag.originY + dy };
+    clamp();
+    pill.style.left = state.pos.x + "px";
+    pill.style.top = state.pos.y + "px";
+  });
+
+  pill.addEventListener("pointerup", (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const moved = drag.moved;
+    drag = null;
+    pill.classList.remove("dragging");
+    if (moved) render();
+    else enterEdit();
+  });
+
+  pill.addEventListener("pointercancel", () => {
+    drag = null;
+    pill.classList.remove("dragging");
+  });
+
+  // click outside commits
+  document.addEventListener("pointerdown", (e) => {
+    if (state.mode !== "edit") return;
+    if (pill.contains(e.target)) return;
+    commit();
+  });
+
+  // ---- controls ----
+
+  document.getElementById("btn-task").addEventListener("click", () => setTask(DEFAULT_TASK, false));
+  document.getElementById("btn-notask").addEventListener("click", () => setTask("", false));
+  document.getElementById("btn-edit").addEventListener("click", enterEdit);
+  document.getElementById("btn-nudge").addEventListener("click", fireNudge);
+  document.getElementById("btn-hide").addEventListener("click", () => {
+    state.hidden = !state.hidden;
+    state.mode = "view";
+    render();
+  });
+  document.getElementById("chk-long").addEventListener("change", (e) => {
+    setTask(e.target.checked ? LONG_TASK : DEFAULT_TASK, e.target.checked);
+  });
+  document.getElementById("chk-rm").addEventListener("change", (e) => {
+    state.reduceMotion = e.target.checked;
+    render();
+  });
+  document.getElementById("prev").addEventListener("click", () => cycle(-1));
+  document.getElementById("next").addEventListener("click", () => cycle(1));
+
+  document.addEventListener("keydown", (e) => {
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (e.key === "ArrowLeft") { e.preventDefault(); cycle(-1); }
+    if (e.key === "ArrowRight") { e.preventDefault(); cycle(1); }
+  });
+
+  window.addEventListener("resize", () => { clamp(); render(); });
+
+  // ---- boot ----
+
+  render();
+  placeCentered();
+  render();
+})();
+</script>
+</body>
+</html>
